@@ -109,12 +109,13 @@ def calibrateZero(args=None):
   May want to rename to zeroCalibration to allow better cycling.
   Should use a command map to reduce verbosity.
   """
-  global zeroPoints, currentAxis, stats
+  global zeroPoints, currentAxis, stats, zIncrement
   display("X Zero: %3.2f Y Zero: %3.2f"%(zeroPoints['x'], zeroPoints['y']), 5, window=stats)
   display("Z Zero: %3.2f C Zero: %3.2f"%(zeroPoints['z'], zeroPoints['center']), 6, window=stats)
   display("Starting calibrateZero. Will first home all axes and then move down to zBuffer from the bed.")
   home()
   moveToZ(zBuffer)
+  while (zBuffer*2) <= zIncrement: zIncrement=zIncrement / 10
   updateStats()
   # move down by progressively smaller increments
   display("Adjust zIncrement and then hit dot to continue.")
@@ -199,7 +200,9 @@ def moveYdown():
   gcode("G1 Y%d F%d"%(-yIncrement, speed))
 
 def moveToZ(location):
+  global zPos
   gcode("G90")
+  zPos = location
   gcode("G1 Z%3.2f F%d"%(location, speed))
   gcode("G91")
 
@@ -244,8 +247,8 @@ def repeatLastCommand():
 def updateStats():
   global stats
   #currentStats = gcode("M114")
-  stats.addstr(0, 0, "X Pos : % 04d Y Pos : % 04d Z Pos : % 04.2f"%(xPos, yPos, zPos))
-  stats.addstr(1, 0, "X Incr: % 04d Y Incr: % 04d Z Incr: % 04.2f"%(xIncrement, yIncrement, zIncrement))
+  stats.addstr(0, 0, "X Pos : % 03d Y Pos : % 03d Z Pos : % 03.2f"%(xPos, yPos, zPos))
+  stats.addstr(1, 0, "X Incr: % 03d Y Incr: % 03d Z Incr: % 03.2f"%(xIncrement, yIncrement, zIncrement))
   stats.addstr(2, 0, "Speed: % 04d"%(speed))
   stats.refresh()
 
@@ -285,6 +288,7 @@ exCmds["calibrateZero"] = calibrateZero
 def exCommand():
   """
   Lots to do here.
+  - handling of arrow keys
   - tab completion of commands
   - command history
   - tab completion of arguments
@@ -326,6 +330,7 @@ def exCommand():
         currentMatch = matches[lastTabIndex]
         status.addstr(":" + currentMatch)
       else:
+        # If we reach here, we have to complete a command argument.
         pass
     else:
       if lastTabIndex != None: cmdString = currentMatch
