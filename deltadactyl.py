@@ -104,17 +104,25 @@ zeroPoints['x'] = 0
 zeroPoints['y'] = 0
 zeroPoints['z'] = 0
 zeroPoints['center'] = 0
+calibrationInProgress = False
 def calibrateZero(args=None):
   """
   May want to rename to zeroCalibration to allow better cycling.
   Should use a command map to reduce verbosity.
   """
-  global zeroPoints, currentAxis, stats
+  global zeroPoints, currentAxis, stats, zIncrement, calibrationInProgress
+  if calibrationInProgress:
+    moveToZ(zBuffer)
+    while (zBuffer) <= zIncrement: incrementZdown()
+    updateStats()
+    return
+  calibrationInProgress = True
   display("X Zero: %3.2f Y Zero: %3.2f"%(zeroPoints['x'], zeroPoints['y']), 5, window=stats)
   display("Z Zero: %3.2f C Zero: %3.2f"%(zeroPoints['z'], zeroPoints['center']), 6, window=stats)
   display("Starting calibrateZero. Will first home all axes and then move down to zBuffer from the bed.")
   home()
   moveToZ(zBuffer)
+  while (zBuffer) <= zIncrement: incrementZdown()
   updateStats()
   # move down by progressively smaller increments
   display("Adjust zIncrement and then hit dot to continue.")
@@ -129,6 +137,7 @@ def calibrateZero(args=None):
       nextAxis()
       nextAxis()
     elif ord(':') == c:
+      # What to do here if calibrateZero is called again?
       exCommand()
     elif ord(';') == c:
       incrementZup()
@@ -150,6 +159,7 @@ def calibrateZero(args=None):
       zeroPoints[currentAxis] = zPos
     elif 27 == c or ord('q') == c:
       display("Exiting calibrateZero.")
+      calibrationInProgress = False
       return
     else:
       display("Command ignored.")
@@ -199,7 +209,9 @@ def moveYdown():
   gcode("G1 Y%d F%d"%(-yIncrement, speed))
 
 def moveToZ(location):
+  global zPos
   gcode("G90")
+  zPos = location
   gcode("G1 Z%3.2f F%d"%(location, speed))
   gcode("G91")
 
@@ -229,13 +241,19 @@ def speedDown():
   global speed
   speed -= 100
 
+zIncrementValues = [100, 50, 20, 10, 5, 1, 0.5, 0.2, 0.1]
+zIncrementValueIndex = 0
 def incrementZdown():
-  global zIncrement
-  zIncrement = zIncrement / 10
+  global zIncrement, zIncrementValueIndex
+  if zIncrementValueIndex == len(zIncrementValues) - 1: return
+  zIncrementValueIndex = zIncrementValueIndex + 1
+  zIncrement = zIncrementValues[zIncrementValueIndex]
 
 def incrementZup():
-  global zIncrement
-  zIncrement = zIncrement * 10
+  global zIncrement, zIncrementValueIndex
+  if zIncrementValueIndex == 0: return
+  zIncrementValueIndex = zIncrementValueIndex - 1
+  zIncrement = zIncrementValues[zIncrementValueIndex]
 
 def repeatLastCommand():
   global lastCommand
@@ -244,8 +262,8 @@ def repeatLastCommand():
 def updateStats():
   global stats
   #currentStats = gcode("M114")
-  stats.addstr(0, 0, "X Pos : % 04d Y Pos : % 04d Z Pos : % 04.2f"%(xPos, yPos, zPos))
-  stats.addstr(1, 0, "X Incr: % 04d Y Incr: % 04d Z Incr: % 04.2f"%(xIncrement, yIncrement, zIncrement))
+  stats.addstr(0, 0, "X Pos : % 03d Y Pos : % 03d Z Pos : % 03.2f"%(xPos, yPos, zPos))
+  stats.addstr(1, 0, "X Incr: % 03d Y Incr: % 03d Z Incr: % 03.2f"%(xIncrement, yIncrement, zIncrement))
   stats.addstr(2, 0, "Speed: % 04d"%(speed))
   stats.refresh()
 
@@ -261,12 +279,11 @@ def setCmd(args):
     display("Unknown variable: " + name)
     return
   if len(args) == 1:
-    if not globals().has_key(name):
-      display("Unknown variable: " + name)
-      return
+    # Display the value
     value = globals()[name]
     display(name + "=" + str(value))
   else:
+    # Set the value
     value = args[1]
     # Try converting to a float.
     # This won't always work correctly, but works for now.
@@ -282,30 +299,38 @@ exCmds = {}
 exCmds["set"] = setCmd
 exCmds["calibrateZero"] = calibrateZero
 
+exCmdHistory = []
+exCmdIndex = 0
 def exCommand():
   """
   Lots to do here.
+  - handling of arrow keys
   - tab completion of commands
   - command history
   - tab completion of arguments
   - proper parsing of command arguments
   """
-  global status, maxx
+  global status, maxx, exCmdIndex
   status.addstr(1, 0, ":")
   curses.curs_set(1)
   cmdString = ""
   lastTabIndex = None
   currentMatch = None
+  origCmd = None
   while 1:
     c = status.getch()
-    if c == 10 or c == 27:
+    if c == 10 or c == 27: # enter or escape
+      # Save the current match
       if lastTabIndex != None: cmdString = currentMatch
+      # Clear the command and hide the cursor
       status.addstr(1, 0, " "*(maxx-1))
       status.refresh()
       curses.curs_set(0)
+      # On escape, return
       if c == 27: return
+      # Otherwise, break out of the loop
       break
-    elif c == 127:
+    elif c == curses.KEY_BACKSPACE: # Backspace
       if lastTabIndex != None: cmdString = currentMatch
       lastTabIndex = None
       currentMatch = None
@@ -313,7 +338,27 @@ def exCommand():
       (y, x) = status.getyx()
       cmdString = cmdString[:-1]
       status.delch(y, x-1)
+    elif c == curses.KEY_UP:
+      # Command history
+      if exCmdIndex == 0: continue
+      exCmdIndex = exCmdIndex - 1
+      if origCmd == None: origCmd = cmdString
+      cmdString = exCmdHistory[exCmdIndex]
+      status.move(1,0)
+      status.clrtoeol()
+      status.addstr(":" + cmdString)
+    elif c == curses.KEY_DOWN:
+      if exCmdIndex == len(exCmdHistory): continue
+      exCmdIndex = exCmdIndex + 1
+      if exCmdIndex == len(exCmdHistory):
+        cmdString = origCmd
+      else:
+        cmdString = exCmdHistory[exCmdIndex]  
+      status.move(1,0)
+      status.clrtoeol()
+      status.addstr(":" + cmdString)
     elif c == ord('\t'):
+      # Tab completion
       if cmdString.find(' ') == -1:
         names = exCmds.keys()
         matches = [n for n in names if n.find(cmdString) == 0]
@@ -326,13 +371,19 @@ def exCommand():
         currentMatch = matches[lastTabIndex]
         status.addstr(":" + currentMatch)
       else:
+        # If we reach here, we have to complete a command argument.
         pass
+    elif c > 256: continue
     else:
       if lastTabIndex != None: cmdString = currentMatch
       lastTabIndex = None
       currentMatch = None
       status.addstr(chr(c))
       cmdString = cmdString + chr(c)
+  if cmdString in exCmdHistory:
+    exCmdHistory.remove(cmdString)
+  exCmdHistory.append(cmdString)
+  exCmdIndex = len(exCmdHistory)
   parts = cmdString.split(" ")
   if exCmds.has_key(parts[0]):
     cmd = exCmds[parts[0]]
@@ -379,6 +430,7 @@ def deltaDactyl(ss):
   # Create the status area
   status = curses.newwin(2, maxx, maxy-2, 0)
   status.addstr(0, 0, " "*maxx, curses.A_REVERSE)
+  status.keypad(1)
   status.refresh()
   while 1:
     c = stdscr.getch()
