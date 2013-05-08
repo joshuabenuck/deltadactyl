@@ -222,6 +222,8 @@ def moveZdown(offset=None):
   - count if a prefix count was specified.
   - zIncrement, otherwise.
   Most other move commands need to handle similar fallback logic.
+  Should repeating the last command use the current or previous zIncrement value?
+  When should zIncrement automatically be adjusted?
   """
   global zPos, lastCommand, count
   lastCommand = moveZdown
@@ -229,7 +231,10 @@ def moveZdown(offset=None):
   elif count != 0:
     offset = count
     count = 0
-  else: offset = zIncrement
+  else:
+    offset = zIncrement
+    while zIncrement > (zPos - offset) and zIncrement != 0.1: incrementZdown()
+  if zPos - offset < -0.001: display("Not going below zero."); return
   zPos -= offset
   gcode("G1 Z%3.2f F%d"%(-offset, speed))
 
