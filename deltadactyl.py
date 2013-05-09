@@ -4,21 +4,22 @@ import sys, os, curses
 
 #board = Serial("/dev/ttyACM0", 115200)
 #home()
+# TODO: Add alias support
 settings = {}
-settings["xPos"] = None
-settings["xIncrement"] = None
-settings["yPos"] = None
-settings["yIncrement"] = None
-settings["zPos"] = None
-settings["zIncrement"] = None
-settings["zBuffer"] = None
-settings["xMin"] = None
-settings["xMax"] = None
-settings["yMin"] = None
-settings["yMax"] = None
-settings["zMin"] = None
-settings["zMax"] = None
-settings["speed"] = None
+settings["xPos"] = float
+settings["xIncrement"] = float
+settings["yPos"] = float
+settings["yIncrement"] = float
+settings["zPos"] = float
+settings["zIncrement"] = float
+settings["zBuffer"] = float
+settings["xMin"] = int
+settings["xMax"] = int
+settings["yMin"] = int
+settings["yMax"] = int
+settings["zMin"] = int
+settings["zMax"] = int
+settings["speed"] = int
 
 increment = 100
 speed = 2400
@@ -105,6 +106,7 @@ zeroPoints['y'] = 0
 zeroPoints['z'] = 0
 zeroPoints['center'] = 0
 calibrationInProgress = False
+# TODO: Add completion list decoration here...
 def calibrateZero(args=None):
   """
   May want to rename to zeroCalibration to allow better cycling.
@@ -272,6 +274,82 @@ def updateStats():
   stats.addstr(2, 0, "Speed: % 04d"%(speed))
   stats.refresh()
 
+TOKID = 0; TOKNUM = 1; TOKEQ = 2; TOKNONE = 3
+def parseIdentifier(args):
+  token = ""
+  while len(args) > 0:
+    c = args[0]; args = args[1:]
+    if c >= 'a' and c <= 'z':
+      token+=c
+    elif c >= 'A' and c <= 'Z':
+      token+=c
+    else:
+      args=c+args
+      break
+  return (TOKID, token, args)
+
+def parseNumber(args):
+  token = ""
+  while len(args) > 0:
+    c = args[0]; args = args[1:]
+    if c >= '0' and c <= '9':
+      token+=c
+    elif c == '.':
+      token+=c
+    else:
+      args=c+args
+      break
+  return (TOKNUM, token, args)
+
+def getSetCmdToken(args):
+  token = ""
+  while len(args) > 0:
+    c = args[0]
+    if c >= 'a' and c <= 'z':
+      return parseIdentifier(args)
+    elif c >= 'A' and c <= 'Z':
+      return parseIdentifier(args)
+    elif c >= '0' and c <= '9':
+      return parseNumber(args)
+    elif c == ' ':
+      args = args[1:]
+      continue
+    elif c == '=':
+      return (TOKEQ, "=", args[1:])
+  return (TOKNONE, None, "")
+
+STMTVAL = 0; STMTSET = 1; STMTERR = 2
+def getSetCmdStatements(args):
+  stmts = []
+  (toktype, token, args) = getSetCmdToken(args)
+  while 1:
+    if toktype == TOKID:
+      var = token
+      (toktype, token, args) = getSetCmdToken(args)
+      if toktype != TOKEQ:
+        stmts.append((STMTVAL, var))
+        continue
+      (toktype, token, args) = getSetCmdToken(args)
+      if toktype != TOKNUM:
+        stmts.append((STMTERR, args))
+        break
+      val = token
+      stmts.append((STMTSET, (var, val)))
+      (toktype, token, args) = getSetCmdToken(args)
+    elif token == None: break
+    else: break
+  return stmts
+
+def getSetCmdCompletions(args):
+  stmts = getSetCmdStatements(args)
+  if len(stmts) == 0: return []
+  print stmts
+  (stype, var)=stmts[-1:][0]
+  if stype == STMTVAL:
+    i = args.find(var)
+    return [args[:i] + n for n in settings.keys() if n.find(var) == 0]
+  return []
+
 def setCmd(args):
   """
   This is very hacky, but it works for now.
@@ -280,7 +358,7 @@ def setCmd(args):
   args = " ".join(args)
   args = args.split("=")
   name = args[0]
-  if not globals().has_key(name):
+  if not settings.has_key(name):
     display("Unknown variable: " + name)
     return
   if len(args) == 1:
@@ -289,13 +367,7 @@ def setCmd(args):
     display(name + "=" + str(value))
   else:
     # Set the value
-    value = args[1]
-    # Try converting to a float.
-    # This won't always work correctly, but works for now.
-    try:
-      value = float(value)
-    except:
-      pass
+    value = settings[name](args[1])
     globals()[name] = value
     display(name + "=" + str(value))
   updateStats()
@@ -306,12 +378,12 @@ exCmds["calibrateZero"] = calibrateZero
 
 exCmdHistory = []
 exCmdIndex = 0
+
+# TODO: Add left / right arrow support
 def exCommand():
   """
   Lots to do here.
   - handling of arrow keys
-  - tab completion of commands
-  - command history
   - tab completion of arguments
   - proper parsing of command arguments
   """
@@ -335,7 +407,7 @@ def exCommand():
       if c == 27: return
       # Otherwise, break out of the loop
       break
-    elif c == curses.KEY_BACKSPACE: # Backspace
+    elif c == curses.KEY_BACKSPACE or c == 127: # Backspace
       if lastTabIndex != None: cmdString = currentMatch
       lastTabIndex = None
       currentMatch = None
@@ -377,6 +449,7 @@ def exCommand():
         status.addstr(":" + currentMatch)
       else:
         # If we reach here, we have to complete a command argument.
+        # TODO: Call tab completion decoration on command.
         pass
     elif c > 256: continue
     else:
@@ -395,6 +468,21 @@ def exCommand():
     cmd(parts[1:])
   else:
     stdscr.addstr("Unknown command: " + str(parts))
+
+"""
+This is a lot harder than it looks.
+Need to figure out which cmd is selected and decide how modifying
+the current cmd affects the history.
+elif c == curses.KEY_LEFT:
+  _, x = status.getyx()
+  if x == 0: continue
+  status.move(1, x - 1)
+elif c == curses.KEY_RIGHT:
+  _, x = status.getyx()
+  # Not sure what the max should be.
+  #if x == 0: continue
+  status.move(1, x + 1)
+"""
 
 cmds = {}
 cmds['h'] = moveXdown
@@ -452,4 +540,5 @@ def deltaDactyl(ss):
     updateStats()
     #stdscr.addstr(cmd.__name__+"\n")
 
-curses.wrapper(deltaDactyl)
+if __name__ == "__main__":
+  curses.wrapper(deltaDactyl)
