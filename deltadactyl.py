@@ -272,6 +272,9 @@ def updateStats():
   stats.addstr(0, 0, "X Pos : % 03d Y Pos : % 03d Z Pos : % 03.2f"%(xPos, yPos, zPos))
   stats.addstr(1, 0, "X Incr: % 03d Y Incr: % 03d Z Incr: % 03.2f"%(xIncrement, yIncrement, zIncrement))
   stats.addstr(2, 0, "Speed: % 04d"%(speed))
+  stats.addstr(3, 0, "Z Buffer: % 3.2F"%(zBuffer))
+  stats.addstr(4, 0, "X Min : % 03d Y Min : % 03d Z Min : % 03.2f"%(xMin, yMin, zMin))
+  stats.addstr(5, 0, "X Max : % 03d Y Max : % 03d Z Max : % 03.2f"%(xMax, yMax, zMax))
   stats.refresh()
 
 TOKID = 0; TOKNUM = 1; TOKEQ = 2; TOKNONE = 3
@@ -343,16 +346,25 @@ def getSetCmdStatements(args):
 def getSetCmdCompletions(args):
   stmts = getSetCmdStatements(args)
   if len(stmts) == 0: return []
-  print stmts
   (stype, var)=stmts[-1:][0]
   if stype == STMTVAL:
     i = args.find(var)
-    return [args[:i] + n for n in settings.keys() if n.find(var) == 0]
+    return ["set " + args[:i] + n for n in settings.keys() if n.find(var)==0]
   return []
 
+completionFuncs = {}
+def completion(tocall):
+  def decorate(f):
+    global completionFuncs
+    completionFuncs[f.__name__] = tocall
+    return f
+  return decorate
+
+@completion(tocall=getSetCmdCompletions)
 def setCmd(args):
   """
   This is very hacky, but it works for now.
+  TODO: Use parser in this function.
   """
   global settings, stdscr
   args = " ".join(args)
@@ -450,7 +462,22 @@ def exCommand():
       else:
         # If we reach here, we have to complete a command argument.
         # TODO: Call tab completion decoration on command.
-        pass
+        # TODO: Figure out if this works with command history.
+        parts = cmdString.split(" ")
+        if len(parts) == 0: continue
+        exCmdName = parts[0]
+        if not exCmds.has_key(exCmdName): continue
+        exCmd = exCmds[exCmdName]
+        if not completionFuncs.has_key(exCmd.__name__): continue
+        matches = completionFuncs[exCmd.__name__](" ".join(parts[1:]))
+        matches.append(cmdString)
+        status.move(1,0)
+        status.clrtoeol()
+        if lastTabIndex == None: lastTabIndex = 0
+        else: lastTabIndex = lastTabIndex + 1
+        if len(matches) == lastTabIndex: lastTabIndex = 0
+        currentMatch = matches[lastTabIndex]
+        status.addstr(":" + currentMatch)
     elif c > 256: continue
     else:
       if lastTabIndex != None: cmdString = currentMatch
