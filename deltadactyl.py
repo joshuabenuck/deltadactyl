@@ -1,9 +1,7 @@
 from serial import Serial
-import sys, os, curses
+import sys, os, curses, config
 
 
-#board = Serial("/dev/ttyACM0", 115200)
-#home()
 # TODO: Add alias support
 settings = {}
 settings["xPos"] = float
@@ -21,67 +19,87 @@ settings["zMin"] = int
 settings["zMax"] = int
 settings["speed"] = int
 
-increment = 100
-speed = 2400
+speed = config.speed
 count = 0
 lastCommand = None
 
-xIncrement = 10
+zMin = 0
+yMin = config.yMin
+xMin = config.xMin
+zMax = config.zMax
+yMax = config.yMax
+xMax = config.xMax
+
+zBuffer = config.zBuffer
+
+xIncrement = config.xIncrement
 xPos = 0
-yIncrement = 10
+yIncrement = config.yIncrement
 yPos = 0
 zIncrement = 100.0
-zPos = 364.4
+zPos = config.zMax
 
-zMin = 0
-yMin = -70
-xMin = -70
-zMax = 364.4
-yMax = 70
-xMax = 70
+DEBUG = False
+def gcode(command):
+  command = command.upper()
+  display(command)
+  if DEBUG: return
+  board.write(command + "\n")
+  line = board.readline()
+  display(line.strip())
+  if line.find("ok") != 0:
+    retval = line
+  else: return line
+  return retval
 
-zBuffer = 50
-
-def home():
+def home(args=None):
+  global xPos, yPos, zPos
   gcode("G28") # Home every axis
+  # The next line is commented out because it causes some
+  # absolutely horrible problems.
+  # All motion commands after issuing it are off.
+  # Too many more uses of this and my belts are going to
+  # be shot!
+  #gcode("G92 Z% 3.2F"%zMax)
   gcode("G91") # Set to relative positioning
+  zPos = zMax
+  xPos = yPos = 0
 
-def down():
-  board.write("G1 Z%d F%d\n"%(self.increment, self.speed))
-  print board.readline()
-  board.write("M114\n")
-  print board.readline()
+def m114(args=None):
+  gcode("M114")
+
+def g1(args):
+  # TODO: Danger, danger! This can lead to bed crashes.
+  # It needs to update the internal state and adjust the zIncrement,
+  # but doesn't currently.
+  gcode("G1 " + " ".join(args))
 
 # May want to change axis to point.
 currentAxis = 'center'
 zeroCalibrationPos = {}
-zeroCalibrationPos['center'] = "X0 Y0"
-zeroCalibrationPos['x'] = "X0 Y80"
-zeroCalibrationPos['y'] = "X-30 Y48"
-zeroCalibrationPos['z'] = "X0 Y0"
-def prevAxis():
+zeroCalibrationPos['center'] = (0, 0)
+zeroCalibrationPos['x'] = (-60, -50)
+zeroCalibrationPos['y'] = (63, -30)
+zeroCalibrationPos['z'] = (0, 80)
+def rotateAxis(axes):
   global zeroCalibrationPos, currentAxis
-  axes = {}
-  axes['x'] = 'center'
-  axes['y'] = 'x'
-  axes['z'] = 'y'
-  axes['center'] = 'z'
   currentAxis = axes[currentAxis]
   display("Switching to axis: " + currentAxis)
-  gcode("g1 %s z%3.2f"%(zeroCalibrationPos[currentAxis], zBuffer))
+  gcode("G90")
+  (x, y) = zeroCalibrationPos[currentAxis]
+  gcode("G1 X%d Y%d Z%3.2f"%(x, y, zBuffer))
+  xPos = x
+  yPos = y
+  zPos = zBuffer
+  gcode("G91")
+
+def prevAxis():
+  axes = {'x':'center', 'y':'x', 'z':'y', 'center':'z'}
+  rotateAxis(axes)
 
 def nextAxis():
-  global zeroCalibrationPos, currentAxis
-  axes = {}
-  axes['center'] = 'x'
-  axes['x'] = 'y'
-  axes['y'] = 'z'
-  axes['z'] = 'center'
-  currentAxis = axes[currentAxis]
-  display("Switching to axis: " + currentAxis)
-  gcode("g90")
-  gcode("g1 %s z%3.2f"%(zeroCalibrationPos[currentAxis], zBuffer))
-  gcode("g91")
+  axes = {'center':'x', 'x':'y', 'y':'z', 'z':'center'}
+  rotateAxis(axes)
 
 def display(msg, y=None, x=None, window=None):
   global stdscr
@@ -100,6 +118,10 @@ def incrementZbuffer():
 def decrementZbuffer():
   zBuffer -= 10
 
+def updateZincrement():
+  global zBuffer, zIncrement
+  while (zBuffer) <= zIncrement: incrementZdown()
+
 zeroPoints = {}
 zeroPoints['x'] = 0
 zeroPoints['y'] = 0
@@ -115,14 +137,13 @@ def calibrateZero(args=None):
   global zeroPoints, currentAxis, stats, zIncrement, calibrationInProgress
   if calibrationInProgress:
     moveToZ(zBuffer)
-    while (zBuffer) <= zIncrement: incrementZdown()
+    updateZincrement()
     updateStats()
     return
   calibrationInProgress = True
   display("X Zero: %3.2f Y Zero: %3.2f"%(zeroPoints['x'], zeroPoints['y']), 5, window=stats)
   display("Z Zero: %3.2f C Zero: %3.2f"%(zeroPoints['z'], zeroPoints['center']), 6, window=stats)
   display("Starting calibrateZero. Will first home all axes and then move down to zBuffer from the bed.")
-  home()
   moveToZ(zBuffer)
   while (zBuffer) <= zIncrement: incrementZdown()
   updateStats()
@@ -174,11 +195,7 @@ def calibrateZero(args=None):
 # x, y, z == change position along given axis
 # set xi yi zi
 # set xlevel ylevel zlevel
-
-def gcode(command):
-  stdscr.addstr(command + "\n")
-  #board.write(command + "\n")
-  #return board.readline()
+# TODO: Implement saving / setting of level values.
 
 def moveXup():
   global xPos, lastCommand
@@ -214,6 +231,7 @@ def moveToZ(location):
   global zPos
   gcode("G90")
   zPos = location
+  updateZincrement()
   gcode("G1 Z%3.2f F%d"%(location, speed))
   gcode("G91")
 
@@ -275,7 +293,23 @@ def updateStats():
   stats.addstr(3, 0, "Z Buffer: % 3.2F"%(zBuffer))
   stats.addstr(4, 0, "X Min : % 03d Y Min : % 03d Z Min : % 03.2f"%(xMin, yMin, zMin))
   stats.addstr(5, 0, "X Max : % 03d Y Max : % 03d Z Max : % 03.2f"%(xMax, yMax, zMax))
+  stats.addstr(6, 0, "X Zero: % 3.2f Y Zero: % 3.2f Z Zero: % 3.2f"%(
+    zeroPoints["x"], zeroPoints["y"], zeroPoints["z"]))
+  stats.addstr(7, 0, "C Zero: % 3.2f"%(zeroPoints["center"]))
   stats.refresh()
+  config = open("config.py", "w")
+  config.write("xIncrement = % 3.2F\n"%xIncrement)
+  config.write("yIncrement = % 3.2F\n"%yIncrement)
+  config.write("zIncrement = % 3.2F\n"%zIncrement)
+  config.write("xMin = % 3.2F\n"%xMin)
+  config.write("yMin = % 3.2F\n"%yMin)
+  config.write("zMin = % 3.2F\n"%zMin)
+  config.write("xMax = % 3.2F\n"%xMax)
+  config.write("yMax = % 3.2F\n"%yMax)
+  config.write("zMax = % 3.2F\n"%zMax)
+  config.write("zBuffer = % 3.2F\n"%zBuffer)
+  config.write("speed = %d\n"%speed)
+  config.close()
 
 TOKID = 0; TOKNUM = 1; TOKEQ = 2; TOKNONE = 3
 def parseIdentifier(args):
@@ -387,6 +421,9 @@ def setCmd(args):
 exCmds = {}
 exCmds["set"] = setCmd
 exCmds["calibrateZero"] = calibrateZero
+exCmds["home"] = home
+exCmds["m114"] = m114
+exCmds["g1"] = g1
 
 exCmdHistory = []
 exCmdIndex = 0
@@ -534,7 +571,7 @@ cmds[';'] = incrementZup
 cmds['q'] = lambda: sys.exit(0)
 
 def deltaDactyl(ss):
-  global stdscr, stats, status, maxx
+  global stdscr, stats, status, maxx, board
 
   # Create left hand status area.
   (maxy, maxx) = ss.getmaxyx()
@@ -545,13 +582,21 @@ def deltaDactyl(ss):
   # Creat the stats area, get it to display, and hide the cursor.
   stats = curses.newwin(maxy/2, (maxx/2)+1, 0, (maxx/2)-1)
   curses.curs_set(0)
-  updateStats()
 
   # Create the status area
   status = curses.newwin(2, maxx, maxy-2, 0)
   status.addstr(0, 0, " "*maxx, curses.A_REVERSE)
   status.keypad(1)
   status.refresh()
+  if not DEBUG:
+    board = Serial("/dev/ttyACM0", 115200)
+    line = ""
+    while line.find("Using Default settings") == -1:
+      line = board.readline()
+      display(line.strip())
+    home()
+  updateStats()
+
   while 1:
     c = stdscr.getch()
     key = chr(c)
