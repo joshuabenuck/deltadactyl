@@ -142,7 +142,7 @@ class SteppedValue(SingleValue):
     self.value = self.values[index]
     return self.value
 
-speed = config.speed
+speed = SingleValue(int, config.speed)
 count = 0
 lastCommand = None
 
@@ -153,7 +153,7 @@ zMax = SingleValue(float, config.zMax)
 yMax = SingleValue(float, config.yMax)
 xMax = SingleValue(float, config.xMax)
 
-zBuffer = SteppedValue([50, 25, 10, 5, 4, 3, 2, 1, 0.5, 0.3, 0.2, 0.1, 0.0], float, config.zBuffer)
+zBuffer = SteppedValue([50, 25, 10, 5, 4, 3, 2, 1.5, 1, 0.5, 0.3, 0.2, 0.1, 0.0], float, config.zBuffer)
 
 incrementValues = [10, 5, 1]
 xIncrement = SteppedValue(incrementValues, float, config.xIncrement)
@@ -328,38 +328,38 @@ def moveXup():
   global xPos, lastCommand
   lastCommand = moveXup
   xPos += xIncrement()
-  gcode("G1 X%d F%d"%(xIncrement(), speed))
+  gcode("G1 X%d F%d"%(xIncrement(), speed()))
 
 def moveYup():
   global yPos, lastCommand
   lastCommand = moveYup
   yPos += yIncrement()
-  gcode("G1 Y%d F%d"%(yIncrement(), speed))
+  gcode("G1 Y%d F%d"%(yIncrement(), speed()))
 
 def moveZup():
   global zPos, lastCommand
   lastCommand = moveZup
   zPos += zIncrement()
-  gcode("G1 Z%3.2f F%d"%(zIncrement(), speed))
+  gcode("G1 Z%3.2f F%d"%(zIncrement(), speed()))
 
 def moveXdown():
   global xPos, lastCommand
   lastCommand = moveXdown
   xPos -= xIncrement()
-  gcode("G1 X%d F%d"%(-xIncrement(), speed))
+  gcode("G1 X%d F%d"%(-xIncrement(), speed()))
 
 def moveYdown():
   global yPos, lastCommand
   lastCommand = moveYdown
   yPos -= yIncrement()
-  gcode("G1 Y%d F%d"%(-yIncrement(), speed))
+  gcode("G1 Y%d F%d"%(-yIncrement(), speed()))
 
 def moveToZ(location):
   global zPos
   gcode("G90")
   zPos(location)
   updateZincrement()
-  gcode("G1 Z%3.2f F%d"%(location, speed))
+  gcode("G1 Z%3.2f F%d"%(location, speed()))
   gcode("G91")
 
 def moveZdown(offset=None):
@@ -383,8 +383,10 @@ def moveZdown(offset=None):
     while zIncrement() > (zPos - offset) and zIncrement() != 0.1: zIncrement.down()
   if zPos - offset < -0.001: display("Not going below zero."); return
   zPos -= offset
-  gcode("G1 Z%3.2f F%d"%(-offset, speed))
+  gcode("G1 Z%3.2f F%d"%(-offset, speed()))
 
+# TODO: Replace with speed.up() and speed.down()
+# Need another setting class. Perhaps IncrementedValue?
 def speedUp():
   global speed
   speed += 100
@@ -402,7 +404,7 @@ def updateStats():
   #currentStats = gcode("M114")
   stats.addstr(0, 0, "X Pos : % 03d Y Pos : % 03d Z Pos : % 03.2f"%(xPos(), yPos(), zPos()))
   stats.addstr(1, 0, "X Incr: % 03d Y Incr: % 03d Z Incr: % 03.2f"%(xIncrement(), yIncrement(), zIncrement()))
-  stats.addstr(2, 0, "Speed: % 04d"%(speed))
+  stats.addstr(2, 0, "Speed: % 04d"%(speed()))
   stats.addstr(3, 0, "Z Buffer: % 3.2F"%(zBuffer()))
   stats.addstr(4, 0, "X Min : % 03d Y Min : % 03d Z Min : % 03.2f"%(xMin(), yMin(), zMin()))
   stats.addstr(5, 0, "X Max : % 03d Y Max : % 03d Z Max : % 03.2f"%(xMax(), yMax(), zMax()))
@@ -421,7 +423,7 @@ def updateStats():
   config.write("yMax = % 3.2F\n"%yMax())
   config.write("zMax = % 3.2F\n"%zMax())
   config.write("zBuffer = % 3.2F\n"%zBuffer())
-  config.write("speed = %d\n"%speed)
+  config.write("speed = %d\n"%speed())
   config.close()
 
 def getSetCmdCompletions(args):
@@ -625,7 +627,7 @@ def deltaDactyl(ss):
   ss.refresh()
   stdscr.scrollok(1) # Allow it to scroll
 
-  # Creat the stats area, get it to display, and hide the cursor.
+  # Create the stats area, get it to display, and hide the cursor.
   stats = curses.newwin(maxy/2, (maxx/2)+1, 0, (maxx/2)-1)
   curses.curs_set(0)
 
