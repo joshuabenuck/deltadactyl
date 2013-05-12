@@ -149,12 +149,25 @@ lastCommand = None
 zMin = SingleValue(float, 0)
 yMin = SingleValue(float, config.yMin)
 xMin = SingleValue(float, config.xMin)
+# TODO: This must match the firmware currently.
+# The goal is to adjust what is sent by reading in
+# what the firmware thinks the max Z value is.
+# If G92 didn't mess up so badly, there would be very
+# few times the firmware would have to be modified.
 zMax = SingleValue(float, config.zMax)
 yMax = SingleValue(float, config.yMax)
 xMax = SingleValue(float, config.xMax)
 
 zBuffer = SteppedValue([50, 25, 10, 5, 4, 3, 2, 1.5, 1, 0.5, 0.3, 0.2, 0.1, 0.0], float, config.zBuffer)
 
+# TODO: Need to prevent xPos and yPos from going
+# over the max values. Most likely to happen in
+# the gcode methods.
+# Also want to reduce the increment when getting
+# close to the max.
+# This may be the appropriate time to introduce
+# onchange methods for SingleValue object and have
+# SteppedValues register for notifications.
 incrementValues = [10, 5, 1]
 xIncrement = SteppedValue(incrementValues, float, config.xIncrement)
 xPos = SingleValue(float, 0)
@@ -175,13 +188,18 @@ def populateSettings():
     settings[var] = globals()[var]
 populateSettings()
 
-DEBUG = True
+DEBUG = False
 def gcode(command):
   command = command.upper()
   display(command)
   if DEBUG: return
   board.write(command + "\n")
-  line = board.readline()
+  line = board.read()
+  while board.inWaiting() > 0:
+    line+=board.read()
+  while line[-1:][0] != '\n':
+    line+=board.read()
+  #line = board.readline()
   display(line.strip())
   if line.find("ok") != 0:
     retval = line
@@ -201,14 +219,27 @@ def home(args=None):
   zPos(zMax())
   xPos(yPos(0))
 
+def temp(args=None):
+  gcode("M105")
+
 def m114(args=None):
   gcode("M114")
+
+def bed(args=None):
+  temp = 55
+  if args != None and len(args) > 0: temp = int(args)
+  gcode("M140 S%d"%temp)
+
+def hotend(args=None):
+  temp = 230
+  if args != None and len(args) > 0: temp = int(args)
+  gcode("M104 S%d"%temp)
 
 def g1(args):
   # TODO: Danger, danger! This can lead to bed crashes.
   # It needs to update the internal state and adjust the zIncrement,
   # but doesn't currently.
-  gcode("G1 " + " ".join(args))
+  gcode("G1 " + args)
 
 # May want to change axis to point.
 currentAxis = 'center'
@@ -247,7 +278,7 @@ def display(msg, y=None, x=None, window=None):
 
 def updateZincrement():
   global zBuffer, zIncrement
-  while zBuffer() <= zIncrement(): zIncrement.down()
+  while zBuffer() < zIncrement() and zBuffer() != 0: zIncrement.down()
 
 zeroPoints = {}
 zeroPoints['x'] = 0
@@ -450,7 +481,7 @@ def setCmd(args):
   TODO: Use parser in this function.
   """
   global settings, stdscr
-  stmts = getSetCmdStatements(" ".join(args))
+  stmts = getSetCmdStatements(args)
   for stmt in stmts:
     if stmt.id == STMTERR: continue
     if not settings.has_key(stmt.var):
@@ -470,6 +501,9 @@ exCmds = {}
 exCmds["set"] = setCmd
 exCmds["calibrateZero"] = calibrateZero
 exCmds["home"] = home
+exCmds["hotend"] = hotend
+exCmds["bed"] = bed
+exCmds["temp"] = temp
 exCmds["m114"] = m114
 exCmds["g1"] = g1
 
@@ -577,7 +611,7 @@ def exCommand():
   parts = cmdString.split(" ")
   if exCmds.has_key(parts[0]):
     cmd = exCmds[parts[0]]
-    cmd(parts[1:])
+    cmd(" ".join(parts[1:]))
   else:
     stdscr.addstr("Unknown command: " + str(parts))
 
