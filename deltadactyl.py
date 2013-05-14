@@ -175,20 +175,21 @@ yIncrement = SteppedValue(incrementValues, float, config.yIncrement)
 yPos = SingleValue(float, 0)
 zIncrement = SteppedValue([100, 50, 20, 10, 5, 1, 0.5, 0.2, 0.1], float, 100.0)
 zPos = SingleValue(float, config.zMax)
+eIncrement = SteppedValue([100, 50, 25, 10, 5, 1], int, config.eIncrement)
 
 # TODO: Add alias support, populate automatically
 settings = {}
 def populateSettings():
   global settings
-  vars = ["xPos", "xIncrement", "yPos", "yIncrement",
-          "zPos", "zIncrement", "zBuffer", "xMin",
+  vars = ["xIncrement", "yIncrement", "zIncrement",
+          "eIncrement", "zBuffer", "xMin",
           "xMax", "yMin", "yMax", "zMin", "zMax", 
           "speed"]
   for var in vars:
     settings[var] = globals()[var]
 populateSettings()
 
-DEBUG = False
+DEBUG = True
 def gcode(command):
   command = command.upper()
   display(command)
@@ -416,6 +417,12 @@ def moveZdown(offset=None):
   zPos -= offset
   gcode("G1 Z%3.2f F%d"%(-offset, speed()))
 
+def extrude():
+  gcode("G1 E%d"%eIncrement())
+
+def retract():
+  gcode("G1 E%d"%-eIncrement())
+
 # TODO: Replace with speed.up() and speed.down()
 # Need another setting class. Perhaps IncrementedValue?
 def speedUp():
@@ -435,7 +442,7 @@ def updateStats():
   #currentStats = gcode("M114")
   stats.addstr(0, 0, "X Pos : % 03d Y Pos : % 03d Z Pos : % 03.2f"%(xPos(), yPos(), zPos()))
   stats.addstr(1, 0, "X Incr: % 03d Y Incr: % 03d Z Incr: % 03.2f"%(xIncrement(), yIncrement(), zIncrement()))
-  stats.addstr(2, 0, "Speed: % 04d"%(speed()))
+  stats.addstr(2, 0, "E Incr: % 03d Speed: % 04d"%(eIncrement(), speed()))
   stats.addstr(3, 0, "Z Buffer: % 3.2F"%(zBuffer()))
   stats.addstr(4, 0, "X Min : % 03d Y Min : % 03d Z Min : % 03.2f"%(xMin(), yMin(), zMin()))
   stats.addstr(5, 0, "X Max : % 03d Y Max : % 03d Z Max : % 03.2f"%(xMax(), yMax(), zMax()))
@@ -447,6 +454,7 @@ def updateStats():
   config.write("xIncrement = % 3.2F\n"%xIncrement())
   config.write("yIncrement = % 3.2F\n"%yIncrement())
   config.write("zIncrement = % 3.2F\n"%zIncrement())
+  config.write("eIncrement = %d\n"%eIncrement())
   config.write("xMin = % 3.2F\n"%xMin())
   config.write("yMin = % 3.2F\n"%yMin())
   config.write("zMin = % 3.2F\n"%zMin())
@@ -644,6 +652,11 @@ cmds['z'] = moveZup
 cmds['X'] = moveXdown
 cmds['Y'] = moveYdown
 cmds['Z'] = moveZdown
+
+cmds['e'] = extrude
+cmds['r'] = retract
+cmds['t'] = temp
+
 cmds[':'] = exCommand
 cmds['.'] = repeatLastCommand
 cmds['s'] = speedDown
